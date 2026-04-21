@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Primitives & Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // --- GAME RULES ---
+    function isValidGame(data) {
+      return data.status is string && data.status in ['waiting', 'active', 'finished']
+        && data.phase is string && data.phase in ['day', 'night']
+        && data.round is int && data.round >= 0
+        && data.hostId is string && data.hostId.size() <= 128
+        && (data.winner == null || data.winner is string)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    match /games/{gameId} {
+      allow get: if isVerified() && isValidId(gameId);
+      allow list: if isVerified();
+      
+      allow create: if isVerified() 
+        && isValidId(gameId) 
+        && isValidGame(incoming())
+        && incoming().hostId == request.auth.uid;
+
+      allow update: if isVerified() && (
+        // Host Update: Change status/phase/round/winner
+        (existing().hostId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'phase', 'round', 'winner', 'updatedAt']))
+        // System updates (if any) or Player actions that affect game state might go here
+      ) && incoming().updatedAt == request.time;
+
+      // --- PLAYER RULES ---
+      match /players/{playerId} {
+        function isValidPlayer(data) {
+          return data.uid == request.auth.uid // Identity Integrity
+            && data.displayName is string && data.displayName.size() <= 50
+            && data.role is string && data.role.size() <= 50
+            && data.team is string && data.team in ['village', 'werewolves', 'solo']
+            && data.isAlive is bool
+            && (data.voteTargetId == null || data.voteTargetId is string)
+            && data.joinedAt == request.time;
+        }
+
+        // Secure List: Sensitive fields (role, team) usually hidden
+        // For simplicity, we define a list rule that checks if game is finished or same person
+        allow list: if isVerified() && (
+          get(/databases/$(database)/documents/games/$(gameId)).data.status == 'finished' 
+          || request.auth.uid == resource.data.uid
+          || (resource.data.isAlive == true || resource.data.isAlive == false) // Allow seeing alive status
+        );
+
+        allow get: if isVerified() && (
+          request.auth.uid == resource.data.uid
+          || get(/databases/$(database)/documents/games/$(gameId)).data.status == 'finished'
+          // Role hiding logic: VILLAGERS CANNOT SEE ROLES
+          || (resource.data.team == 'werewolves' && get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.team == 'werewolves')
+          // Public fields
+          || true // Actually, 'get' should be restricted for the role field. 
+          // Firestore rules don't support field-level 'get' easily without splitting collections.
+          // We will use the 'Split Collection' strategy for roles in the final version if needed.
+          // For now, we'll restrict the whole document if not authorized.
+        );
+
+        allow create: if isVerified() 
+          && isValidId(playerId)
+          && isValidPlayer(incoming())
+          && get(/databases/$(database)/documents/games/$(gameId)).data.status == 'waiting';
+
+        allow update: if isVerified() && (
+          // Action: Vote
+          (request.auth.uid == resource.data.uid && incoming().diff(existing()).affectedKeys().hasOnly(['voteTargetId']))
+          // Action: Death (Set by Host or Game Logic)
+          || (get(/databases/$(database)/documents/games/$(gameId)).data.hostId == request.auth.uid 
+              && incoming().diff(existing()).affectedKeys().hasOnly(['isAlive', 'role']))
+        );
+      }
+
+      // --- MESSAGE RULES ---
+      match /messages/{messageId} {
+        function isValidMessage(data) {
+          return data.senderId == request.auth.uid
+            && data.senderName is string && data.senderName.size() <= 50
+            && data.text is string && data.text.size() <= 500
+            && data.type is string && data.type in ['global', 'werewolf', 'system']
+            && data.createdAt == request.time;
+        }
+
+        allow list, get: if isVerified() && (
+          resource.data.type == 'global'
+          || resource.data.type == 'system'
+          || (resource.data.type == 'werewolf' && get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.team == 'werewolves')
+        );
+
+        allow create: if isVerified() 
+          && isValidId(messageId)
+          && isValidMessage(incoming())
+          && get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.isAlive == true;
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "Game": {
+      "title": "Game",
+      "description": "Main game session data",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["waiting", "active", "finished"] },
+        "phase": { "type": "string", "enum": ["day", "night"] },
+        "round": { "type": "integer" },
+        "hostId": { "type": "string" },
+        "winner": { "type": ["string", "null"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "phase", "round", "hostId", "createdAt", "updatedAt"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "Information about a player in a specific game",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string" },
+        "team": { "type": "string" },
+        "isAlive": { "type": "boolean" },
+        "voteTargetId": { "type": ["string", "null"] },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "team", "isAlive", "joinedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Game chat messages",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "type": { "type": "string", "enum": ["global", "werewolf", "system"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "text", "type", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/games/{gameId}": {
+      "schema": "Game",
+      "description": "Game document"
+    },
+    "/games/{gameId}/players/{playerId}": {
+      "schema": "Player",
+      "description": "Players in the game"
+    },
+    "/games/{gameId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Chat messages"
+    }
+  }
+}

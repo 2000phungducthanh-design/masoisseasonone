@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #020617;
+  --color-surface: #0f172a;
+  --color-card: #1e293b;
+  --color-accent: #eab308;
+  --color-danger: #ef4444;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --font-sans: "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-[var(--color-bg)] text-[var(--color-text-primary)] font-sans antialiased;
+  }
+}
+
+.atmosphere {
+  background: radial-gradient(circle at 50% -20%, #1e293b 0%, transparent 70%);
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.phone-frame {
+  @apply mx-auto flex h-full w-full max-w-[400px] flex-col overflow-hidden bg-[var(--color-surface)] shadow-2xl md:h-[800px] md:max-h-[90vh] md:rounded-[40px] md:border-[10px] md:border-slate-800;
+}
+
+.player-card {
+  @apply relative flex aspect-square flex-col items-center justify-center rounded-xl bg-[var(--color-card)] p-2 transition-all hover:brightness-110 active:scale-95;
+}
+
+.btn-primary {
+  @apply flex h-14 w-full items-center justify-center rounded-2xl bg-yellow-600 text-sm font-bold tracking-wide text-white shadow-lg transition-all active:scale-95;
+}
+
+.chat-bubble {
+  @apply rounded-lg p-3 text-[13px] leading-relaxed;
+}
+
+.scroll-mask {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%);
+}
+

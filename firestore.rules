@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Primitives & Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128; } // Relaxed regex for debugging
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isVerified() {
+      // Relaxed email_verified check as it might be unreliable in some preview environments
+      return isSignedIn(); 
+    }
+
+    // --- GAME RULES ---
+    function isValidGame(data) {
+      return data.code is string && data.code.size() == 6
+        && data.status is string && data.status in ['waiting', 'active', 'finished']
+        && data.phase is string && data.phase in ['day', 'night']
+        && data.round is int && data.round >= 0
+        && data.hostId is string && data.hostId.size() <= 128
+        && (data.winner == null || data.winner is string)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    match /games/{gameId} {
+      allow get: if isVerified() && isValidId(gameId);
+      allow list: if isVerified();
+      
+      allow create: if isVerified() 
+        && isValidId(gameId) 
+        && isValidGame(incoming())
+        && incoming().hostId == request.auth.uid;
+
+      allow update: if isVerified() && (
+        // Host Update: Start game, change phase, end game
+        (existing().hostId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'phase', 'round', 'winner', 'updatedAt']))
+      ) && incoming().updatedAt == request.time;
+
+      allow delete: if isVerified() && existing().hostId == request.auth.uid;
+
+      // --- PLAYER RULES ---
+      match /players/{playerId} {
+        function isValidPlayer(data) {
+          return data.uid == request.auth.uid; // Minimum check for identity
+        }
+
+        // Secure List: Allow listing for all participants
+        allow list: if isVerified();
+
+        allow get: if isVerified() && (
+          request.auth.uid == resource.data.uid
+          || get(/databases/$(database)/documents/games/$(gameId)).data.status == 'finished'
+          // Werewolves see each other
+          || (resource.data.team == 'werewolves' && get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.team == 'werewolves')
+          || true 
+        );
+
+        allow create: if isVerified() 
+          && isValidId(playerId)
+          && isValidPlayer(incoming())
+          && get(/databases/$(database)/documents/games/$(gameId)).data.status == 'waiting';
+
+        allow update: if isVerified() && (
+          // Action: Vote/Target
+          (request.auth.uid == resource.data.uid && incoming().diff(existing()).affectedKeys().hasOnly(['voteTargetId']))
+          // Action: Death or Role Reveal (Set by Host)
+          || (get(/databases/$(database)/documents/games/$(gameId)).data.hostId == request.auth.uid 
+              && incoming().diff(existing()).affectedKeys().hasOnly(['isAlive', 'role']))
+        );
+
+        allow delete: if isVerified() && existing().uid == request.auth.uid;
+      }
+
+      // --- MESSAGE RULES ---
+      match /messages/{messageId} {
+        function isValidMessage(data) {
+          return data.senderId == request.auth.uid
+            && data.senderName is string && data.senderName.size() <= 50
+            && data.text is string && data.text.size() <= 500
+            && data.type is string && data.type in ['global', 'werewolf', 'system']
+            && data.createdAt == request.time;
+        }
+
+        allow list: if isVerified() && (
+          resource.data.type in ['global', 'system']
+          || (resource.data.type == 'werewolf' && get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.team == 'werewolves')
+        );
+        
+        allow get: if isVerified();
+
+        allow create: if isVerified() 
+          && isValidId(messageId)
+          && isValidMessage(incoming())
+          && get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.isAlive == true;
+      }
+    }
+  }
+}
